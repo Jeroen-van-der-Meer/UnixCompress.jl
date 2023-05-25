@@ -3,12 +3,10 @@ module UnixCompress
 export compress
 
 # TO DO:
-# - Check if we increase the variable code length at the correct moment.
 # - Implement CLEAR signal.
 # - Implement decompress().
 # - Add tests.
 # - Add docs.
-# - Fix off-by-one bug.
 
 # For performance reasons, we use tries to implement the code table of our
 # compress function.
@@ -99,7 +97,7 @@ function compress(input::IO,
             if current_bit_position >= 0x10
                 write(output, output_buffer)
                 current_bit_position -= 0x10
-                output_buffer = code >>> (0x10 - current_bit_position)
+                output_buffer = code >>> (code_length - current_bit_position)
             # If the buffer isn't full, we write only the second byte to output
             # and bitshift the remaining bits in the buffer accordingly.
             else
@@ -132,8 +130,9 @@ function compress(input::IO,
         output_buffer |= (code << current_bit_position)
         current_bit_position += code_length
         write(output, output_buffer)
-        if current_bit_position > 0x10
-            output_buffer = code >>> (0x20 - current_bit_position)
+        current_bit_position -= 0x10
+        if current_bit_position > 0x00
+            output_buffer = code >>> (code_length - current_bit_position)
             write(output, output_buffer % UInt8)
         end
     end
