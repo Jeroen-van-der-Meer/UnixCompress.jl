@@ -130,9 +130,10 @@ function compress(input::IO,
         output_buffer |= (code << current_bit_position)
         current_bit_position += code_length
         write(output, output_buffer)
-        current_bit_position -= 0x10
-        if current_bit_position > 0x00
-            output_buffer = code >>> (code_length - current_bit_position)
+        # We may have to print one more byte in case the final code didn't fit in
+        # the buffer.
+        if current_bit_position > 0x10
+            output_buffer = code >>> (code_length - current_bit_position + 0x10)
             write(output, output_buffer % UInt8)
         end
     end
