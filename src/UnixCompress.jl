@@ -5,10 +5,10 @@ export compress
 # TO DO:
 # - Check if we increase the variable code length at the correct moment.
 # - Implement CLEAR signal.
-# - Let compress() work on files and stuff.
 # - Implement decompress().
 # - Add tests.
 # - Add docs.
+# - Fix off-by-one bug.
 
 # For performance reasons, we use tries to implement the code table of our
 # compress function.
@@ -28,13 +28,26 @@ function TableNode(value::UInt16)
     return TableNode(children, value)
 end
 
-# Unix compress always starts off with codes
+# Unix compress always starts off with codes for individual the 256 initial bytes,
+# which it maps to itself.
 function initialize_table()
     children = Dict(i => TableNode(UInt16(i)) for i in 0x00:0xff)
     return TableNode(children, nothing)
 end
 
-function compress(input::IOStream, output::IOStream; max_code_length::Integer=16)
+function compress(input_path::AbstractString, 
+                  output_path::AbstractString="$input_path.Z";
+                  max_code_length::Integer=16)
+    input = open(input_path, "r")
+    output = open(output_path, "w")
+    compress(input, output; max_code_length)
+    close(input)
+    close(output)
+end
+
+function compress(input::IO, 
+                  output::IO; 
+                  max_code_length::Integer=16)
     # Unix compress is hard-coded not to allow code length beyond 16 bits. This
     # was because of memory constraints, along with the observation that larger
     # codes gave little improvements in compression performance.
