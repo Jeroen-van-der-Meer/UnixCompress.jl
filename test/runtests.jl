@@ -30,7 +30,7 @@ end
 # I think these fail because we haven't implemented the CLEAR signal yet.
 # @test benchmark("kennedy.xls")
 # @test benchmark("lcet10.txt")
-# @test benchmark("plrabn12.txt")
-# @test benchmark("ptt5")
+@test benchmark("plrabn12.txt")
+@test benchmark("ptt5")
 @test benchmark("sum")
 @test benchmark("xargs.1")

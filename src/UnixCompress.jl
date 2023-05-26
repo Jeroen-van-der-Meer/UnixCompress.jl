@@ -5,7 +5,6 @@ export compress
 # TO DO:
 # - Implement CLEAR signal.
 # - Implement decompress().
-# - Add tests.
 # - Add docs.
 
 # For performance reasons, we use tries to implement the code table of our
@@ -107,7 +106,7 @@ function compress(input::IO,
             end
             # Append a new node to our code table provided that we haven't
             # reached the hard limit of max_code codes.
-            if latest_code <= max_code
+            if latest_code < max_code
                 latest_code += 0x0001
                 new_node = TableNode(latest_code)
                 current_node.children[byte] = new_node
