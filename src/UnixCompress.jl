@@ -143,4 +143,88 @@ function compress(input::IO,
     end
 end
 
+function default_decompress_path(input_path::AbstractString)
+    if endswith(input_path, ".Z")
+        return input_path[begin : end - 2]
+    else
+        error("Please specify output file name!")
+    end
+end
+
+function decompress(input_path::AbstractString, 
+                    output_path::AbstractString=default_decompress_path(input_path))
+    input = open(input_path, "r")
+    output = open(output_path, "w")
+    decompress(input, output)
+    close(input)
+    close(output)
+end
+
+function decompress(input::IO, 
+                    output::IO)
+    # We read three header bytes. The first two are the magic header for Unix
+    # compress. The third byte consists of three fixed bits (100) followed five
+    # bits indicating the maximum code length. These three fixed bits are a
+    # legacy artifact.
+    first_byte, second_byte = read(input, UInt8), read(input, UInt8)
+    if first_byte != 0x1f || second_byte != 0x9d
+        error("""
+              Based on the input header, input file does not appear to be
+              compressed with Unix compress.
+              """)
+    end
+    third_byte = read(input, UInt8)
+    if third_byte & 0b11100000 != 0b10000000
+        warn("""
+             The header implies that the file may have been compressed by a very
+             old version of Unix compress. Proceeding anyway.
+             """)
+    end
+    max_code_length = third_byte & 0b00011111
+    max_code = 0x0001 << max_code_length - 0x0001
+    # latest_code indicates the largest code current in our code table, or
+    # equivalently, the one added most recently. Note that we start out at
+    # 0x0100 (256) and not 0x00ff (255). This is because Unix compress reserves
+    # the code 256 for CLEAR, which signals that the entire code table should
+    # be reset.
+    latest_code = 0x0100
+    # Unix compress uses variable-length codes, starting with length 9 and
+    # gradually increasing as we progress through the input file (unless a
+    # CLEAR signal is received).
+    code_length = 0x09
+    max_code_of_current_length = 0x0001 << code_length
+    # To properly deal with codes of an irregular amount of bits, we first
+    # write our codes to an input buffer before processing them.
+    input_buffer = 0x0000
+    # current_bit_position indicates how many bits of the input buffer are
+    # presently filled.
+    current_bit_position = 0x00
+    
+    decode_table = Dict{UInt16, Vector{UInt8}}()
+    latest_invoked_code = Vector{UInt8}([])
+
+    for byte in readeach(input, UInt8)
+        # To do: Some magic bitshifting to extract codes out
+    
+        # Then, for every code, go through the following logic.
+        if code != 0x0100
+            # If code has been encountred before, then...
+            if code < latest_code
+                decode = decode_table[code]
+                write(output, decode)
+                # This will fail on the very first code! Dirty solution: Use 0x0100
+                # to catch that case, since we're never gonna use that code anyway.
+                latest_code += 0x0001
+                decode_table[latest_code] = latest_invoked_code[:] * decode[begin]
+                latest_invoked_code = decode
+            # Exceptional case which needs to be handled separately.
+            else
+                println("Haven't seen this code before!")
+            end
+        # If code == 0x0100, that indicates a clear signal.
+        else
+            println("Clearing my decode table!")
+        end
+
+    end
 end # module UnixCompress
