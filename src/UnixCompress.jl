@@ -49,7 +49,10 @@ function compress(input::IO,
     # was because of memory constraints, along with the observation that larger
     # codes gave little improvements in compression performance.
     if max_code_length < 9 || max_code_length > 17
-        throw(DomainError(max_code_length, "Invalid max code length!"))
+        error("""
+              Invalid max code length. Unix compress allows the max code length
+              to be anywhere from 9 to 16.
+              """)
     end
     max_code = 0x0001 << max_code_length - 0x0001
     # We write three header bytes. The first two are the magic header for Unix
@@ -58,7 +61,7 @@ function compress(input::IO,
     # legacy artifact.
     write(output, 0x1f, 0x9d, 0x80 | UInt8(max_code_length))
     root = initialize_table()
-    # latest_code indicates the largest code current in our code table, or
+    # latest_code indicates the largest code currently in our code table, or
     # equivalently, the one added most recently. Note that we start out at
     # 0x0100 (256) and not 0x00ff (255). This is because Unix compress reserves
     # the code 256 for CLEAR, which signals that the entire code table should
@@ -94,6 +97,8 @@ function compress(input::IO,
             # If the entire buffer is filled up, we write it to output and put
             # the remaining code bits in a cleared buffer.
             if current_bit_position >= 0x10
+                # Note that write() writes the two bytes in the opposite order.
+                # So, for instance, write(0xabcd) gives you 0xcd and then 0xab.
                 write(output, output_buffer)
                 current_bit_position -= 0x10
                 output_buffer = code >>> (code_length - current_bit_position)
