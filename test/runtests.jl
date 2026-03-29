@@ -27,9 +27,8 @@ end
 @test benchmark("cp.html")
 @test benchmark("fields.c")
 @test benchmark("grammar.lsp")
-# I think these fail because we haven't implemented the CLEAR signal yet.
-# @test benchmark("kennedy.xls")
-# @test benchmark("lcet10.txt")
+@test benchmark("kennedy.xls")
+@test benchmark("lcet10.txt")
 @test benchmark("plrabn12.txt")
 @test benchmark("ptt5")
 @test benchmark("sum")
