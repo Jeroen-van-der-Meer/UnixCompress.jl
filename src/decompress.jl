@@ -1,3 +1,13 @@
+"""
+    decompress(input_path, output_path)
+
+Decompress a `.Z` file produced by Unix compress (LZW).
+
+# Arguments
+
+- `input_path`: Path to input file.
+- `output_path`: Defaults to `input_path` with the `.Z` suffix stripped.
+"""
 function decompress(
     input_path::AbstractString,
     output_path::AbstractString = _default_decompress_path(input_path)
@@ -9,6 +19,12 @@ function decompress(
     close(output)
 end
 
+"""
+    decompress(input::IO, output::IO)
+
+Decompress from an input stream to an output stream using the Unix decompress
+(LZW) algorithm.
+"""
 function decompress(input::IO, output::IO)
     # Read all input at once for performance (avoids per-byte IO overhead).
     input_data = read(input)
@@ -141,7 +157,8 @@ function decompress(input::IO, output::IO)
                 # The decompressor bumps code_length one entry earlier than the
                 # compressor ("early change") because the decompressor's table
                 # lags by one entry relative to the compressor's.
-                if latest_code >= max_code_of_current_length - 1 && code_length < max_code_length
+                if (latest_code >= max_code_of_current_length - 1) &&
+                        (code_length < max_code_length)
                     code_length += 1
                     max_code_of_current_length <<= 1
                 end
@@ -163,3 +180,7 @@ function _default_decompress_path(input_path::AbstractString)
         error("Please specify output file name!")
     end
 end
+
+# `uncompress` more historically accurate than `decompress`. I'll make one into
+# a synonym of the other.
+uncompress = decompress

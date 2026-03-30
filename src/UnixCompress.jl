@@ -2,9 +2,7 @@ module UnixCompress
 
 export compress
 export decompress
-
-# TO DO:
-# - Add docs.
+export uncompress # Alias for decompress
 
 const CLEAR_CODE = UInt16(256)
 const INIT_CODE_LENGTH = 9

@@ -24,6 +24,20 @@ function initialize_trie!(children::Matrix{Int32})
     end
 end
 
+"""
+    compress(input_path, output_path; max_code_length = 16)
+
+Compress a file using the Unix compress (LZW) algorithm.
+
+# Arguments
+
+- `input_path`: Path to input file.
+- `output_path`: Defaults to `input_path` with a `.Z` suffix appended.
+
+# Keyword Arguments
+
+- `max_code_length = 16`: Maximum LZW code width in bits.
+"""
 function compress(
     input_path::AbstractString,
     output_path::AbstractString = "$input_path.Z";
@@ -36,6 +50,12 @@ function compress(
     close(output)
 end
 
+"""
+    compress(input::IO, output::IO; max_code_length = 16)
+
+Compress from an input stream to an output stream using the Unix compress (LZW)
+algorithm.
+"""
 function compress(input::IO, output::IO; max_code_length::Integer = 16)
     # Unix compress is hard-coded not to allow code length beyond 16 bits. This
     # was because of memory constraints, along with the observation that larger
