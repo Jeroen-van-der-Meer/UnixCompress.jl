@@ -6,34 +6,33 @@ export compress
 # - Implement decompress().
 # - Add docs.
 
-# For performance reasons, we use tries to implement the code table of our
-# compress function.
-struct TableNode
-    children::Dict{UInt8, TableNode}
-    # All our codes shall be stored in 16 bits. We will use an auxiliary
-    # variable to indicate how many of these bits should actually be written
-    # to output. As Unix compress is variable-size, this number changes over time.
-    # We allow a table node to have a value of nothing --- a value we reserve
-    # for the root node. Besides semantics, this lets us deal with the empty
-    # file.
-    value::Union{Nothing, UInt16}
-end
-
-function TableNode(value::UInt16)
-    children = Dict{UInt8, TableNode}()
-    return TableNode(children, value)
-end
-
-# Unix compress always starts off with codes for the 256 individual initial
-# bytes, which it maps to itself.
-function initialize_table()
-    children = Dict(i => TableNode(UInt16(i)) for i in 0x00:0xff)
-    return TableNode(children, nothing)
-end
-
-const CLEAR_CODE = UInt16(0x0100)
+const CLEAR_CODE = UInt32(256)
 const INIT_CODE_LENGTH = 9
 const CHECK_GAP = 10000
+const ROOT_NODE = Int32(1)
+const EMPTY_NODE = Int32(0)
+
+# For performance reasons, we use a matrix-based trie to implement the code
+# table of our compress function. The children matrix has dimensions (256, N)
+# where N is the maximum number of nodes. children[byte+1, node] gives the
+# child node for that (node, byte) pair, or 0 meaning "no child".
+#
+# Node numbering:
+#   0         = no child
+#   1         = root
+#   code + 2  = trie node for LZW code `code`
+# The code for a node n >= 2 is simply n - 2.
+@inline node_for_code(code::UInt16) = Int32(code) + Int32(2)
+@inline code_for_node(node::Int32) = UInt16(node - 2)
+
+# Unix compress always starts off with codes for the 256 individual initial
+# bytes, which it maps to itself. We initialize root's children accordingly.
+function initialize_trie!(children::Matrix{Int32})
+    fill!(children, EMPTY_NODE)
+    for b in UInt16(0):UInt16(255)
+        children[b + 1, ROOT_NODE] = node_for_code(b)
+    end
+end
 
 function compress(input_path::AbstractString,
                   output_path::AbstractString="$input_path.Z";
@@ -73,7 +72,11 @@ function compress(input::IO,
     # legacy artifact.
     push!(out, 0x1f, 0x9d, 0x80 | UInt8(max_code_length))
 
-    root = initialize_table()
+    # Matrix trie: children[byte+1, node] = child node (or 0 for no child).
+    max_node = node_for_code(max_code)
+    children = Matrix{Int32}(undef, 256, max_node)
+    initialize_trie!(children)
+
     # latest_code indicates the largest code currently in our code table, or
     # equivalently, the one added most recently. Note that we start out at
     # 0x0100 (256) and not 0x00ff (255). This is because Unix compress reserves
@@ -98,23 +101,24 @@ function compress(input::IO,
     table_full = false
     bytes_in = 0
     checkpoint = CHECK_GAP
-    ratio = Int64(0)
+    ratio = 0
     # current_node indicates where we are in the trie. We start off at the root.
-    current_node = root
+    current_node = ROOT_NODE
 
     for (bytes_in, byte) in enumerate(input_data)
         # If the current node has the current byte as one of its children, that
         # means that the current pattern has been encountered before. We simply
         # traverse the trie and proceed to the next byte.
-        if haskey(current_node.children, byte)
-            current_node = current_node.children[byte]
+        child = children[byte + 1, current_node]
+        if child != EMPTY_NODE
+            current_node = child
             continue
         end
         # If there's no such child, a new pattern is encountered. We write the
-        # value of the current node to the output. Because the value is a code
-        # of a possibly irregular amount of bits, this involves quite a bit
+        # code of the current node to the output. Because the code is a
+        # possibly irregular number of bits, this involves quite a bit
         # of tedious bitshifting (pun intended).
-        code = current_node.value
+        code = code_for_node(current_node)
         bit_buffer |= UInt32(code) << bits_in_buffer
         bits_in_buffer += code_length
         while bits_in_buffer >= 8
@@ -127,7 +131,7 @@ function compress(input::IO,
         if !table_full
             if latest_code < max_code
                 latest_code += UInt16(1)
-                current_node.children[byte] = TableNode(latest_code)
+                children[byte + 1, current_node] = node_for_code(latest_code)
                 if latest_code == max_code_of_current_length
                     code_length += 1
                     max_code_of_current_length <<= 1
@@ -139,10 +143,10 @@ function compress(input::IO,
         end
         # When the code table is full, periodically check if the compression
         # ratio is degrading. If so, emit a CLEAR code and reset the table.
-        if table_full && bytes_in >= checkpoint
+        if table_full && (bytes_in >= checkpoint)
             checkpoint = bytes_in + CHECK_GAP
-            bytes_out = Int64(length(out))
-            current_ratio = (Int64(bytes_in) << 8) ÷ bytes_out
+            bytes_out = length(out)
+            current_ratio = (bytes_in << 8) ÷ bytes_out
             if current_ratio >= ratio
                 ratio = current_ratio
             else
@@ -170,24 +174,24 @@ function compress(input::IO,
                     push!(out, 0x00)
                 end
                 # Reset the code table and all associated state.
-                root = initialize_table()
+                initialize_trie!(children)
                 latest_code = CLEAR_CODE
                 code_length = INIT_CODE_LENGTH
                 max_code_of_current_length = 1 << code_length
                 table_full = false
-                ratio = Int64(0)
+                ratio = 0
             end
         end
-        current_node = root.children[byte]
+        current_node = children[byte + 1, ROOT_NODE]
     end
     # When we've reached the end of the file, we output the remaining bits in
     # the buffer, as well as the code of the node that we're ending at.
-    code = current_node.value
-    # If code === nothing, we don't actually write any output data. In particular,
-    # if we compress an empty file called foo and we already have a nonempty file
-    # called foo.Z, then foo.Z will not be overwritten by an empty file. Unix
-    # compress exhibits the same pathology.
-    if !isnothing(code)
+    # If current_node is still at root, the input was empty and we don't write
+    # any output data. In particular, if we compress an empty file called foo
+    # and we already have a nonempty file called foo.Z, then foo.Z will not be
+    # overwritten by an empty file. Unix compress exhibits the same pathology.
+    if current_node != ROOT_NODE
+        code = code_for_node(current_node)
         bit_buffer |= UInt32(code) << bits_in_buffer
         bits_in_buffer += code_length
         while bits_in_buffer >= 8
