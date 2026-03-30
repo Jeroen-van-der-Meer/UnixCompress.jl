@@ -1,35 +1,50 @@
 using UnixCompress
-using Mmap
 using Test
 
-const TEST_DATA_PATH = "./testdata"
+const TEST_DATA_PATH = joinpath(@__DIR__, "testdata")
 
-function benchmark(file::AbstractString)
-    path = joinpath(TEST_DATA_PATH, file)
+const TEST_FILES = [
+    "asyoulik.txt",
+    "alice29.txt",
+    "cp.html",
+    "fields.c",
+    "grammar.lsp",
+    "kennedy.xls",
+    "lcet10.txt",
+    "plrabn12.txt",
+    "ptt5",
+    "sum",
+    "xargs.1",
+]
 
-    # File compressed with the real Unix compress.
-    output_unix = open("$path.Z_original")
-
-    # File compressed by Julia.
-    compress(path)
-    output_Julia = open("$path.Z")
-
-    # Use Mmap.mmap() to leave files on disk.
-    is_equal = (mmap(output_unix) == mmap(output_Julia))
-
-    close(output_unix)
-    close(output_Julia)
-    return is_equal
+@testset "Compress" begin
+    for f in TEST_FILES
+        path = joinpath(TEST_DATA_PATH, f)
+        compress(path)
+        @test read("$path.Z") == read("$path.Z_original")
+        rm("$path.Z")
+    end
 end
 
-@test benchmark("asyoulik.txt")
-@test benchmark("alice29.txt")
-@test benchmark("cp.html")
-@test benchmark("fields.c")
-@test benchmark("grammar.lsp")
-@test benchmark("kennedy.xls")
-@test benchmark("lcet10.txt")
-@test benchmark("plrabn12.txt")
-@test benchmark("ptt5")
-@test benchmark("sum")
-@test benchmark("xargs.1")
+@testset "Decompress" begin
+    for f in TEST_FILES
+        path = joinpath(TEST_DATA_PATH, f)
+        outpath = "$path.decompressed"
+        decompress("$path.Z_original", outpath)
+        @test read(outpath) == read(path)
+        rm(outpath)
+    end
+end
+
+@testset "Non-default max_code_length" begin
+    path = joinpath(TEST_DATA_PATH, "kennedy.xls")
+    for bits in 9:16
+        zpath = "$path.$bits.Z"
+        outpath = "$path.$bits.roundtrip"
+        compress(path, zpath; max_code_length=bits)
+        decompress(zpath, outpath)
+        @test read(outpath) == read(path)
+        rm(zpath)
+        rm(outpath)
+    end
+end
