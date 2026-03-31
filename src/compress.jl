@@ -43,11 +43,24 @@ function compress(
     output_path::AbstractString = "$input_path.Z";
     max_code_length::Integer = 16
 )
-    input = open(input_path, "r")
-    output = open(output_path, "w")
+    # Read file into memory and wrap in IOBuffer for efficient byte-by-byte iteration
+    input_data = read(input_path)
+    input = IOBuffer(input_data)
+    output = IOBuffer()
     compress(input, output; max_code_length)
-    close(input)
-    close(output)
+    write(output_path, take!(output))
+end
+
+"""
+    compress(input::Vector{UInt8}; max_code_length = 16) -> Vector{UInt8}
+
+Compress a byte vector using the Unix compress (LZW) algorithm.
+"""
+function compress(input::Vector{UInt8}; max_code_length::Integer = 16)
+    input_io = IOBuffer(input)
+    output_io = IOBuffer()
+    compress(input_io, output_io; max_code_length)
+    return take!(output_io)
 end
 
 """
@@ -68,19 +81,11 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
     end
     max_code = 0x0001 << max_code_length - 0x0001
 
-    # Read all input at once for performance (avoids per-byte IO overhead).
-    input_data = read(input)
-
-    # Accumulate output in a byte vector for performance (avoids per-byte
-    # write() calls).
-    out = Vector{UInt8}()
-    sizehint!(out, length(input_data))
-
-    # We write three header bytes. The first two are the magic header for Unix
+    # Write three header bytes. The first two are the magic header for Unix
     # compress. The third byte consists of three fixed bits (100) followed five
     # bits indicating the maximum code length. These three fixed bits are a
     # legacy artifact.
-    push!(out, 0x1f, 0x9d, 0x80 | UInt8(max_code_length))
+    write(output, 0x1f, 0x9d, 0x80 | UInt8(max_code_length))
 
     # Matrix trie: children[byte+1, node] = child node (or 0 for no child).
     max_node = node_for_code(max_code)
@@ -119,7 +124,11 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
     # current_node indicates where we are in the trie. We start off at the root.
     current_node = ROOT_NODE
 
-    for (bytes_in, byte) in enumerate(input_data)
+    # Process input byte-by-byte
+    bytes_in = 0
+    while !eof(input)
+        byte = read(input, UInt8)
+        bytes_in += 1
         # If the current node has the current byte as one of its children, that
         # means that the current pattern has been encountered before. We simply
         # traverse the trie and proceed to the next byte.
@@ -136,7 +145,7 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
         bit_buffer |= UInt32(code) << bits_in_buffer
         bits_in_buffer += code_length
         while bits_in_buffer >= 8
-            push!(out, UInt8(bit_buffer & 0xff))
+            write(output, UInt8(bit_buffer & 0xff))
             bit_buffer >>>= 8
             bits_in_buffer -= 8
         end
@@ -149,7 +158,7 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
                 if latest_code == max_code_of_current_length
                     code_length += 1
                     max_code_of_current_length <<= 1
-                    epoch_offset = length(out)
+                    epoch_offset = position(output)
                 end
             end
             if latest_code >= max_code
@@ -160,7 +169,7 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
         # ratio is degrading. If so, emit a CLEAR code and reset the table.
         if table_full && (bytes_in >= checkpoint)
             checkpoint = bytes_in + CHECK_GAP
-            bytes_out = length(out)
+            bytes_out = position(output)
             current_ratio = (bytes_in << 8) ÷ bytes_out
             if current_ratio >= ratio
                 ratio = current_ratio
@@ -169,13 +178,13 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
                 bit_buffer |= UInt32(CLEAR_CODE) << bits_in_buffer
                 bits_in_buffer += code_length
                 while bits_in_buffer >= 8
-                    push!(out, UInt8(bit_buffer & 0xff))
+                    write(output, UInt8(bit_buffer & 0xff))
                     bit_buffer >>>= 8
                     bits_in_buffer -= 8
                 end
                 # Flush any remaining partial byte.
                 if bits_in_buffer > 0
-                    push!(out, UInt8(bit_buffer & 0xff))
+                    write(output, UInt8(bit_buffer & 0xff))
                     bits_in_buffer = 0
                     bit_buffer = UInt32(0)
                 end
@@ -183,12 +192,12 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
                 # the current epoch. Unix compress organizes codes into groups
                 # of 8 codes (= code_length bytes), and CLEAR must land on a
                 # group boundary.
-                local_bytes = length(out) - epoch_offset
+                local_bytes = position(output) - epoch_offset
                 padding = (code_length - local_bytes % code_length) % code_length
                 for _ in 1:padding
-                    push!(out, 0x00)
+                    write(output, 0x00)
                 end
-                epoch_offset = length(out)
+                epoch_offset = position(output)
                 # Reset the code table and all associated state.
                 initialize_trie!(children)
                 latest_code = CLEAR_CODE
@@ -211,13 +220,12 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
         bit_buffer |= UInt32(code) << bits_in_buffer
         bits_in_buffer += code_length
         while bits_in_buffer >= 8
-            push!(out, UInt8(bit_buffer & 0xff))
+            write(output, UInt8(bit_buffer & 0xff))
             bit_buffer >>>= 8
             bits_in_buffer -= 8
         end
         if bits_in_buffer > 0
-            push!(out, UInt8(bit_buffer & 0xff))
+            write(output, UInt8(bit_buffer & 0xff))
         end
     end
-    write(output, out)
 end
