@@ -95,6 +95,7 @@ function decompress(input::IO, output::IO)
     # Unix compress organizes codes into groups that align to code_length-byte
     # boundaries. After a CLEAR code, remaining codes in the group are padding.
     group = Vector{UInt8}(undef, max_code_length)
+    code_mask = UInt16((1 << code_length) - 1)
     while !eof(input)
         group_size = code_length
         group_bytes = readbytes!(input, group, group_size)
@@ -109,7 +110,6 @@ function decompress(input::IO, output::IO)
         bit_buffer = UInt32(0)
         bits_in_buffer = 0
         gpos = 1  # 1-based indexing for Julia
-        code_mask = UInt16((1 << code_length) - 1)
 
         for _ in 1:n_codes
             # Fill the bit buffer until we have enough bits for one code.
@@ -133,6 +133,7 @@ function decompress(input::IO, output::IO)
                 latest_code = CLEAR_CODE
                 code_length = INIT_CODE_LENGTH
                 max_code_of_current_length = 1 << code_length
+                code_mask = UInt16((1 << code_length) - 1)
                 prev_code = CLEAR_CODE
                 break
             end
@@ -180,6 +181,7 @@ function decompress(input::IO, output::IO)
                         (code_length < max_code_length)
                     code_length += 1
                     max_code_of_current_length <<= 1
+                    code_mask = UInt16((1 << code_length) - 1)
                 end
             end
 

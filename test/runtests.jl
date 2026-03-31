@@ -48,3 +48,8 @@ end
         rm(outpath)
     end
 end
+
+@testset "Edge cases" begin
+    @test uncompress(compress(UInt8[])) == UInt8[]
+    @test uncompress(compress([0x00])) == [0x00]
+end

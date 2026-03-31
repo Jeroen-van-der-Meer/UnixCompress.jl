@@ -211,10 +211,6 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
     end
     # When we've reached the end of the file, we output the remaining bits in
     # the buffer, as well as the code of the node that we're ending at.
-    # If current_node is still at root, the input was empty and we don't write
-    # any output data. In particular, if we compress an empty file called foo
-    # and we already have a nonempty file called foo.Z, then foo.Z will not be
-    # overwritten by an empty file. Unix compress exhibits the same pathology.
     if current_node != ROOT_NODE
         code = code_for_node(current_node)
         bit_buffer |= UInt32(code) << bits_in_buffer
