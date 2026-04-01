@@ -47,7 +47,7 @@ function compress(
     input_data = read(input_path)
     input = IOBuffer(input_data)
     output = IOBuffer()
-    compress(input, output; max_code_length)
+    compress(input, output; max_code_length = max_code_length)
     write(output_path, take!(output))
 end
 
@@ -59,7 +59,7 @@ Compress a byte vector using the Unix compress (LZW) algorithm.
 function compress(input::Vector{UInt8}; max_code_length::Integer = 16)
     input_io = IOBuffer(input)
     output_io = IOBuffer()
-    compress(input_io, output_io; max_code_length)
+    compress(input_io, output_io; max_code_length = max_code_length)
     return take!(output_io)
 end
 
