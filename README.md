@@ -4,11 +4,9 @@ A pure Julia implementation of the Unix `compress` and `uncompress` utilities, u
 
 ## Installation
 
-Package has to be developed locally, as it is not available in the Julia registry yet.
-
 ```julia
-using Pkg
-Pkg.dev("UnixCompress")
+import Pkg
+Pkg.add("UnixCompress")
 ```
 
 ## Usage
