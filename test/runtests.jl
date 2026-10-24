@@ -1,4 +1,5 @@
 using UnixCompress
+using Random
 using Test
 
 const TEST_DATA_PATH = joinpath(@__DIR__, "testdata")
@@ -85,6 +86,57 @@ Base.write(io::WriteOnlyIO, byte::UInt8) = write(io.buffer, byte)
         compress(IOBuffer(data), io; max_code_length = bits)
         @test take!(io)[length(prefix) + 1 : end] == expected
     end
+end
+
+# Pack a sequence of 9-bit codes into a block-mode .Z stream. Only valid for
+# short sequences that don't reach a code length increase.
+function pack_9bit_codes(codes)
+    out = UInt8[0x1f, 0x9d, 0x90]
+    bit_buffer = UInt32(0)
+    bits_in_buffer = 0
+    for code in codes
+        bit_buffer |= UInt32(code) << bits_in_buffer
+        bits_in_buffer += 9
+        while bits_in_buffer >= 8
+            push!(out, UInt8(bit_buffer & 0xff))
+            bit_buffer >>>= 8
+            bits_in_buffer -= 8
+        end
+    end
+    bits_in_buffer > 0 && push!(out, UInt8(bit_buffer & 0xff))
+    return out
+end
+
+@testset "Corrupt input" begin
+    # Sanity check: the KwKwK case (code == next free code) is valid.
+    @test decompress(pack_9bit_codes([0x41, 257])) == Vector{UInt8}("AAA")
+    # First code must be a literal byte.
+    @test_throws ErrorException decompress(pack_9bit_codes([300]))
+    # Code beyond the next free code.
+    @test_throws ErrorException decompress(pack_9bit_codes([0x41, 258]))
+    @test_throws ErrorException decompress(pack_9bit_codes([0x41, 0x42, 300]))
+    # First code after a CLEAR must be a literal byte. The CLEAR's group is
+    # padded out to 8 codes, so the bad code starts the next group.
+    @test_throws ErrorException decompress(
+        pack_9bit_codes([0x41, 256, 0, 0, 0, 0, 0, 0, 300]))
+
+    # Randomly corrupted input must either decompress or throw an
+    # ErrorException, never fail with some other exception.
+    rng = MersenneTwister(0)
+    valid = compress(read(joinpath(TEST_DATA_PATH, "cp.html")))
+    unexpected = []
+    for _ in 1:1000
+        corrupt = copy(valid)
+        for _ in 1:rand(rng, 1:3)
+            corrupt[rand(rng, 4:length(corrupt))] = rand(rng, UInt8)
+        end
+        try
+            decompress(corrupt)
+        catch e
+            e isa ErrorException || push!(unexpected, e)
+        end
+    end
+    @test isempty(unexpected)
 end
 
 @testset "Edge cases" begin

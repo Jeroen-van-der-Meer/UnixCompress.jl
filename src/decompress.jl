@@ -144,6 +144,9 @@ function decompress(input::IO, output::IO)
 
             # First code after start or CLEAR: just output the single byte.
             if !has_prev_code
+                if code > 0x00ff
+                    error("Corrupt input: expected a literal byte code, got $code.")
+                end
                 write(output, UInt8(code))
                 prev_code = code
                 has_prev_code = true
@@ -154,7 +157,13 @@ function decompress(input::IO, output::IO)
             # For the KwKwK exceptional case (code == latest_code + 1), the
             # string is prev_string + first_byte_of_prev_string. We handle
             # this by walking prev_code's chain and appending its first byte.
+            # Any code beyond latest_code + 1 isn't in the table yet, so the
+            # input must be corrupt. (Comparing with latest_code + 1 directly
+            # would overflow when latest_code == 0xffff.)
             is_kwkwk = code > latest_code
+            if is_kwkwk && code != latest_code + UInt16(1)
+                error("Corrupt input: code $code is beyond the next free code $(latest_code + 1).")
+            end
             c = is_kwkwk ? prev_code : code
             stack_len = 0
             while c > 0x00ff
