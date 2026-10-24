@@ -36,7 +36,9 @@ Compress a file using the Unix compress (LZW) algorithm.
 
 # Keyword Arguments
 
-- `max_code_length = 16`: Maximum LZW code width in bits.
+- `max_code_length = 16`: Maximum LZW code width in bits, from 9 to 16. Due to a
+  bug in most reference implementations, I'd recommend using at least 10 for
+  portable output.
 """
 function compress(
     input_path::AbstractString,
@@ -78,6 +80,12 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
               Invalid max code length. Unix compress allows the max code length
               to be anywhere from 9 to 16.
               """)
+    end
+    # Released versions of ncompress (up to and including 5.0) mishandle a
+    # max code length of 9.
+    if max_code_length == 9
+        @warn "Reference implementations mishandle a max code length of 9. " *
+              "Set it to 10 or more for portable output." maxlog = 1
     end
     max_code = 0x0001 << max_code_length - 0x0001
 
