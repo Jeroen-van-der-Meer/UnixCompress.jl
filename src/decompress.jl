@@ -88,12 +88,16 @@ function decompress(input::IO, output::IO)
     code_length = INIT_CODE_LENGTH
     max_code_of_current_length = 1 << code_length
     # prev_code tracks the previous code for building new decode table entries.
-    # We use CLEAR_CODE as a placeholder meaning "no previous code yet".
-    prev_code = CLEAR_CODE
+    # has_prev_code is false at the start and after a CLEAR. We can't use a
+    # sentinel code value for this, since in non-block mode 256 is an ordinary
+    # code, and at 16 bits every UInt16 value is a valid code.
+    prev_code = UInt16(0)
+    has_prev_code = false
 
     # Process input in groups of code_length bytes (= 8 codes per group).
     # Unix compress organizes codes into groups that align to code_length-byte
-    # boundaries. After a CLEAR code, remaining codes in the group are padding.
+    # boundaries. After a CLEAR code or a code length increase, the remaining
+    # codes in the group are padding.
     group = Vector{UInt8}(undef, max_code_length)
     code_mask = UInt16((1 << code_length) - 1)
     while !eof(input)
@@ -134,14 +138,15 @@ function decompress(input::IO, output::IO)
                 code_length = INIT_CODE_LENGTH
                 max_code_of_current_length = 1 << code_length
                 code_mask = UInt16((1 << code_length) - 1)
-                prev_code = CLEAR_CODE
+                has_prev_code = false
                 break
             end
 
             # First code after start or CLEAR: just output the single byte.
-            if prev_code == CLEAR_CODE
+            if !has_prev_code
                 write(output, UInt8(code))
                 prev_code = code
+                has_prev_code = true
                 continue
             end
 
@@ -170,6 +175,7 @@ function decompress(input::IO, output::IO)
             end
 
             # Add a new entry to the decode table: prev_string + first_byte.
+            code_length_increased = false
             if latest_code < max_code
                 latest_code += UInt16(1)
                 suffix[latest_code + 1] = first_byte
@@ -182,10 +188,20 @@ function decompress(input::IO, output::IO)
                     code_length += 1
                     max_code_of_current_length <<= 1
                     code_mask = UInt16((1 << code_length) - 1)
+                    code_length_increased = true
                 end
             end
 
             prev_code = code
+
+            # When the code length increases, the compressor pads the current
+            # group, so we skip the rest of it. In block mode the increase
+            # always coincides with the end of a group, but in non-block mode
+            # (where the first new code is 256 rather than 257) it falls one
+            # code into a group.
+            if code_length_increased
+                break
+            end
         end
     end
 end
