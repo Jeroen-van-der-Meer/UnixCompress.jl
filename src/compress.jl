@@ -86,6 +86,11 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
     # bits indicating the maximum code length. These three fixed bits are a
     # legacy artifact.
     write(output, 0x1f, 0x9d, 0x80 | UInt8(max_code_length))
+    # bytes_out counts the bytes we have written to output, header included.
+    # We keep count ourselves rather than calling position(output), which
+    # isn't supported by non-seekable streams such as pipes, and doesn't start
+    # at zero if output already had content before we started writing.
+    bytes_out = 3
 
     # Matrix trie: children[byte+1, node] = child node (or 0 for no child).
     max_node = node_for_code(max_code)
@@ -146,6 +151,7 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
         bits_in_buffer += code_length
         while bits_in_buffer >= 8
             write(output, UInt8(bit_buffer & 0xff))
+            bytes_out += 1
             bit_buffer >>>= 8
             bits_in_buffer -= 8
         end
@@ -158,7 +164,7 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
                 if latest_code == max_code_of_current_length
                     code_length += 1
                     max_code_of_current_length <<= 1
-                    epoch_offset = position(output)
+                    epoch_offset = bytes_out
                 end
             end
             if latest_code >= max_code
@@ -169,7 +175,6 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
         # ratio is degrading. If so, emit a CLEAR code and reset the table.
         if table_full && (bytes_in >= checkpoint)
             checkpoint = bytes_in + CHECK_GAP
-            bytes_out = position(output)
             current_ratio = (bytes_in << 8) ÷ bytes_out
             if current_ratio >= ratio
                 ratio = current_ratio
@@ -179,12 +184,14 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
                 bits_in_buffer += code_length
                 while bits_in_buffer >= 8
                     write(output, UInt8(bit_buffer & 0xff))
+                    bytes_out += 1
                     bit_buffer >>>= 8
                     bits_in_buffer -= 8
                 end
                 # Flush any remaining partial byte.
                 if bits_in_buffer > 0
                     write(output, UInt8(bit_buffer & 0xff))
+                    bytes_out += 1
                     bits_in_buffer = 0
                     bit_buffer = UInt32(0)
                 end
@@ -192,12 +199,13 @@ function compress(input::IO, output::IO; max_code_length::Integer = 16)
                 # the current epoch. Unix compress organizes codes into groups
                 # of 8 codes (= code_length bytes), and CLEAR must land on a
                 # group boundary.
-                local_bytes = position(output) - epoch_offset
+                local_bytes = bytes_out - epoch_offset
                 padding = (code_length - local_bytes % code_length) % code_length
                 for _ in 1:padding
                     write(output, 0x00)
                 end
-                epoch_offset = position(output)
+                bytes_out += padding
+                epoch_offset = bytes_out
                 # Reset the code table and all associated state.
                 initialize_trie!(children)
                 latest_code = CLEAR_CODE

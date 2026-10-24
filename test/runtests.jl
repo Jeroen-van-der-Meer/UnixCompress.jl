@@ -62,6 +62,31 @@ end
     end
 end
 
+# A minimal non-seekable output stream: it supports writing bytes but not
+# `position`, like a pipe or a terminal.
+struct WriteOnlyIO <: IO
+    buffer::IOBuffer
+end
+Base.write(io::WriteOnlyIO, byte::UInt8) = write(io.buffer, byte)
+
+@testset "Compress to IO" begin
+    data = read(joinpath(TEST_DATA_PATH, "kennedy.xls"))
+    for bits in (9, 12, 16)
+        expected = compress(data; max_code_length = bits)
+
+        io = WriteOnlyIO(IOBuffer())
+        compress(IOBuffer(data), io; max_code_length = bits)
+        @test take!(io.buffer) == expected
+
+        # Output that already has content must not affect the result.
+        prefix = zeros(UInt8, 1_000_003)
+        io = IOBuffer()
+        write(io, prefix)
+        compress(IOBuffer(data), io; max_code_length = bits)
+        @test take!(io)[length(prefix) + 1 : end] == expected
+    end
+end
+
 @testset "Edge cases" begin
     @test uncompress(compress(UInt8[])) == UInt8[]
     @test uncompress(compress([0x00])) == [0x00]
