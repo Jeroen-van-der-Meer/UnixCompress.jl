@@ -139,6 +139,12 @@ end
     @test isempty(unexpected)
 end
 
+@testset "Non-ASCII output paths" begin
+    @test UnixCompress._default_decompress_path("café.Z") == "café"
+    @test UnixCompress._default_decompress_path("数据.Z") == "数据"
+    @test_throws ErrorException UnixCompress._default_decompress_path("foo")
+end
+
 @testset "Edge cases" begin
     @test uncompress(compress(UInt8[])) == UInt8[]
     @test uncompress(compress([0x00])) == [0x00]

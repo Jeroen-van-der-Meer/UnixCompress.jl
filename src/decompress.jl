@@ -217,7 +217,7 @@ end
 
 function _default_decompress_path(input_path::AbstractString)
     if endswith(input_path, ".Z")
-        return input_path[begin : end - 2]
+        return chop(input_path; tail = 2)
     else
         error("Please specify output file name!")
     end
